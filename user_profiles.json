@@ -1,0 +1,13 @@
+{
+  "streamlit_user": {
+    "jurisdiction": "unknown",
+    "tax_category": "unknown",
+    "turnover_tier": "unknown",
+    "language": "en",
+    "business_type": "unknown",
+    "escalation_count": 0,
+    "total_queries": 0,
+    "created_at": "2026-03-02T08:50:02.892294+00:00",
+    "updated_at": "2026-03-02T08:50:02.892720+00:00"
+  }
+}

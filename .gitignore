@@ -1,0 +1,22 @@
+# Environment variables
+.env
+
+# Virtual environment
+venv/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Local databases
+*.db
+
+# Runtime artifacts
+execution_trace.json
+
+# Vector store
+chroma_episodic/
+
+# OS files
+.DS_Store
+Thumbs.db
