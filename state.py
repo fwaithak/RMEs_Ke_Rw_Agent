@@ -30,6 +30,8 @@ class AgentState(TypedDict):
     missing_info_description: Optional[str]
     clarification_question: Optional[str]
     pending_clarification: Optional[str]
+    needs_checklist: bool
+    needs_calendar: bool
 
     # retrieval
     retrieved_docs: List[Dict]
@@ -80,3 +82,5 @@ class ReasoningOutput(BaseModel):
         default=None,
         description="Natural-language question to send the user",
     )
+    needs_checklist: bool = Field(default=False, description="User wants a compliance checklist")
+    needs_calendar: bool = Field(default=False, description="User wants scheduling/reminders")

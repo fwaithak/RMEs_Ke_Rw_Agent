@@ -35,6 +35,16 @@ Follow these rules in order:
 
 4. Never ask for information already present in the user profile.
 
+5. **Ambiguity detection**:
+   - If you can determine **both** jurisdiction and compliance_type from the query (or history/profile), set `ambiguity_flag=False` and fill them.
+   - If the query is about taxes/compliance but you **cannot determine jurisdiction OR cannot determine compliance_type** (i.e., either is missing), set `ambiguity_flag=True` and provide a specific `clarification_question` asking for the missing information.
+
+6. You MUST decide whether the user wants:
+   - a compliance checklist (`needs_checklist`)
+   - scheduling/reminders (`needs_calendar`)
+
+Return them as explicit booleans.
+
 Respond ONLY with a valid JSON object matching this schema:
 {
   "jurisdiction":             "<country name or 'unknown'>",
@@ -43,7 +53,9 @@ Respond ONLY with a valid JSON object matching this schema:
   "ambiguity_flag":           <true | false>,
   "missing_info_type":        "<jurisdiction | compliance_type | business_details | null>",
   "missing_info_description": "<explanation or null>",
-  "clarification_question":   "<question string or null>"
+  "clarification_question":   "<question string or null>",
+  "needs_checklist":          <true | false>,
+  "needs_calendar":           <true | false>
 }"""
 
 ANSWER_SYSTEM = """You are a knowledgeable tax compliance assistant for African markets.
@@ -145,11 +157,17 @@ def create_nodes(
         pending = state.get("pending_clarification")
         attempts = profile.get("clarification_attempts", 0)
 
+        # Retrieve previous turn's intent flags (they exist because state carries over)
+        prev_needs_checklist = state.get("needs_checklist", False)
+        prev_needs_calendar = state.get("needs_calendar", False)
+
+
         if pending:
             combined_query = (
-                f"[Clarification context]\n"
-                f"We previously asked: {pending}\n"
-                f"User's answer: {query}"
+            f"[Clarification context]\n"
+            f"We previously asked: {pending}\n"
+            f"Original request: {state.get('original_query_for_clarification', '')}\n"  
+            f"User's answer: {query}"
             )
         else:
             combined_query = query
@@ -177,6 +195,7 @@ def create_nodes(
             f"Extract the required information as JSON."
         )
 
+
         try:
             response = llm_json.invoke([
                 SystemMessage(content=REASONING_SYSTEM),
@@ -191,6 +210,22 @@ def create_nodes(
                 if raw.get(field) in ("null", "none", ""):
                     raw[field] = None
             validated = ReasoningOutput(**raw)
+            
+            if pending:
+                # We are in a clarification follow‑up: keep previous intent, but allow the new answer to add new requests
+                needs_checklist = prev_needs_checklist or validated.needs_checklist
+                needs_calendar = prev_needs_calendar or validated.needs_calendar
+            else:
+                # Normal turn: use what the LLM extracted
+                needs_checklist = validated.needs_checklist
+                needs_calendar = validated.needs_calendar
+
+            if (validated.jurisdiction in (None, "unknown") or validated.compliance_type in (None, "unknown")):
+                if not validated.ambiguity_flag:
+                    validated.ambiguity_flag = True
+                    validated.missing_info_type = "jurisdiction" if validated.jurisdiction in (None, "unknown") else "compliance_type"
+                    validated.missing_info_description = "Please specify your country or the tax type."
+                    validated.clarification_question = "Which country are you in and what tax type are you asking about?"
 
             return {
                 "jurisdiction": validated.jurisdiction,
@@ -201,7 +236,10 @@ def create_nodes(
                 "missing_info_description": validated.missing_info_description,
                 "clarification_question": validated.clarification_question,
                 "pending_clarification": None,
+                "needs_checklist": needs_checklist,
+                "needs_calendar": needs_calendar,
             }
+            
 
         except Exception as e:
             logger.warning(f"reasoning_node error: {e}")
@@ -217,8 +255,9 @@ def create_nodes(
                     "Could you rephrase it?"
                 ),
                 "pending_clarification": None,
+                "needs_checklist": prev_needs_checklist,   # preserve intent on error
+                "needs_calendar": prev_needs_calendar,
             }
-
     # ------------------------------------------------------------------
     # Node 4: retrieval (ACT – data fetch)
     # ------------------------------------------------------------------
@@ -311,6 +350,7 @@ def create_nodes(
             return {
                 "response": question,
                 "pending_clarification": question,
+                "original_query_for_clarification": state["current_query"],
             }
 
         if action == "ESCALATE":
@@ -374,6 +414,8 @@ def create_nodes(
     # Node 7: schedule_reminders
     # ------------------------------------------------------------------
     def schedule_reminders_node(state: AgentState) -> dict:
+        if not state.get("needs_calendar", False):
+            return {"scheduled_events": None}
         checklist = state.get("generated_checklist")
         if not checklist:
             return {"scheduled_events": None}
@@ -421,6 +463,9 @@ def create_nodes(
     # Node 8: generate_documents
     # ------------------------------------------------------------------
     def generate_documents_node(state: AgentState) -> dict:
+        # Only run if the user actually wants a checklist
+        if not (state.get("needs_checklist", False) or state.get("needs_calendar", False)):
+            return {"generated_checklist": None, "scheduled_events": None}
         try:
             checklist = document_automation_api(
                 jurisdiction=state.get("jurisdiction", "unknown"),

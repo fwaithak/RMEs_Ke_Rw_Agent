@@ -18,18 +18,23 @@ CHECKPOINT_DB = "./agent_checkpoints.db"
 
 def _route_after_act(state: AgentState) -> str:
     """
-    On revision passes, skip tool nodes to avoid duplicate calendar events.
-    Normal first-pass ANSWER routes through the tool chain.
+    After acting, decide whether to run tools or go directly to evaluation.
+
+    - If this is the first pass (revision == 0) AND the user wants either
+      a checklist or a calendar reminder, run the tool chain.
+    - Otherwise, if we answered, go to evaluation.
+    - Non‑answer actions go straight to memory update.
     """
     action = state.get("action", "")
     revision = state.get("revision_count", 0)
 
     if action in ("ANSWER", "ANSWER_WITH_CAVEAT"):
-        if revision == 0:
+        if revision == 0 and (
+            state.get("needs_checklist", False) or state.get("needs_calendar", False)
+        ):
             return "generate_documents"
         return "evaluate"
     return "update_memory"
-
 
 def _route_after_evaluate(state: AgentState) -> str:
     """If revision needed, loop back to retrieval with broader strategy."""

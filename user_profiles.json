@@ -1,13 +1,14 @@
 {
   "streamlit_user": {
-    "jurisdiction": "unknown",
-    "tax_category": "unknown",
+    "jurisdiction": "Kenya",
+    "tax_category": "VAT",
     "turnover_tier": "unknown",
     "language": "en",
     "business_type": "unknown",
-    "escalation_count": 0,
-    "total_queries": 0,
-    "created_at": "2026-03-02T08:50:02.892294+00:00",
-    "updated_at": "2026-03-02T08:50:02.892720+00:00"
+    "escalation_count": 1,
+    "total_queries": 7,
+    "created_at": "2026-03-02T11:21:39.510758+00:00",
+    "updated_at": "2026-03-02T12:30:30.655528+00:00",
+    "clarification_attempts": 0
   }
 }
