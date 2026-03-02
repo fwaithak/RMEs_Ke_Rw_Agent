@@ -17,9 +17,23 @@ from tools import document_automation_api, productivity_scheduler_api
 
 logger = logging.getLogger("ComplianceAdvisor")
 
-# ─── Constants ─────────────────────────────────────────────────────────
+# ─── Constants 
 
 MAX_CLARIFICATION_ATTEMPTS = 3
+
+TAX_KEYWORDS = {
+    "tax", "vat", "paye", "withholding", "wht", "cit",
+    "income tax", "corporate tax", "business license",
+    "compliance", "filing", "deadline", "penalty", "penalties",
+    "return", "returns", "kra", "rra", "ura", "rwanda revenue",
+    "kenya revenue", "rra", "e-tax", "domestic taxes",
+}
+
+def _is_tax_related(text: str) -> bool:
+    if not text:
+        return False
+    lowered = text.lower()
+    return any(keyword in lowered for keyword in TAX_KEYWORDS)
 
 REASONING_SYSTEM = """You are a tax compliance assistant for East and Central Africa.
 
@@ -210,22 +224,24 @@ def create_nodes(
                 if raw.get(field) in ("null", "none", ""):
                     raw[field] = None
             validated = ReasoningOutput(**raw)
-            
-            if pending:
-                # We are in a clarification follow‑up: keep previous intent, but allow the new answer to add new requests
-                needs_checklist = prev_needs_checklist or validated.needs_checklist
-                needs_calendar = prev_needs_calendar or validated.needs_calendar
-            else:
-                # Normal turn: use what the LLM extracted
-                needs_checklist = validated.needs_checklist
-                needs_calendar = validated.needs_calendar
 
-            if (validated.jurisdiction in (None, "unknown") or validated.compliance_type in (None, "unknown")):
-                if not validated.ambiguity_flag:
-                    validated.ambiguity_flag = True
-                    validated.missing_info_type = "jurisdiction" if validated.jurisdiction in (None, "unknown") else "compliance_type"
-                    validated.missing_info_description = "Please specify your country or the tax type."
-                    validated.clarification_question = "Which country are you in and what tax type are you asking about?"
+            is_off_topic = (
+                not _is_tax_related(combined_query)
+                and validated.jurisdiction == "unknown"
+                and validated.compliance_type == "unknown"
+            )
+            if is_off_topic:
+                return {
+                    "jurisdiction": "unknown",
+                    "compliance_type": "unknown",
+                    "language": validated.language,
+                    "ambiguity_flag": False,
+                    "missing_info_type": None,
+                    "missing_info_description": None,
+                    "clarification_question": None,
+                    "pending_clarification": None,
+                    "off_topic": True,
+                }
 
             return {
                 "jurisdiction": validated.jurisdiction,
@@ -236,13 +252,23 @@ def create_nodes(
                 "missing_info_description": validated.missing_info_description,
                 "clarification_question": validated.clarification_question,
                 "pending_clarification": None,
-                "needs_checklist": needs_checklist,
-                "needs_calendar": needs_calendar,
+                "off_topic": False,
             }
-            
 
         except Exception as e:
             logger.warning(f"reasoning_node error: {e}")
+            if not _is_tax_related(combined_query):
+                return {
+                    "ambiguity_flag": False,
+                    "jurisdiction": "unknown",
+                    "compliance_type": "unknown",
+                    "language": profile.get("language", "en"),
+                    "missing_info_type": None,
+                    "missing_info_description": None,
+                    "clarification_question": None,
+                    "pending_clarification": None,
+                    "off_topic": True,
+                }
             return {
                 "ambiguity_flag": True,
                 "jurisdiction": profile.get("jurisdiction", "unknown"),
@@ -255,8 +281,7 @@ def create_nodes(
                     "Could you rephrase it?"
                 ),
                 "pending_clarification": None,
-                "needs_checklist": prev_needs_checklist,   # preserve intent on error
-                "needs_calendar": prev_needs_calendar,
+                "off_topic": False,
             }
     # ------------------------------------------------------------------
     # Node 4: retrieval (ACT – data fetch)
@@ -319,7 +344,9 @@ def create_nodes(
     # Node 5: decide (DECIDE)
     # ------------------------------------------------------------------
     def decide_node(state: AgentState) -> dict:
-        if state.get("ambiguity_flag", False):
+        if state.get("off_topic", False):
+            action = "OFF_TOPIC"
+        elif state.get("ambiguity_flag", False):
             action = (
                 "ASK_CLARIFICATION"
                 if state.get("clarification_question")
@@ -341,6 +368,15 @@ def create_nodes(
     # ------------------------------------------------------------------
     def act_node(state: AgentState) -> dict:
         action = state.get("action", "ANSWER")
+
+        if action == "OFF_TOPIC":
+            return {
+                "response": (
+                    "I'm built to help with tax and compliance questions "
+                    "for African markets. Try asking about VAT, PAYE, "
+                    "filing deadlines, or penalties."
+                )
+            }
 
         if action == "ASK_CLARIFICATION":
             question = state.get(

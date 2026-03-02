@@ -56,6 +56,7 @@ class AgentRunner:
             "generated_checklist": None,
             "scheduled_events": None,
             "ambiguity_flag": False,
+            "off_topic": False,
             "jurisdiction": "unknown",
             "compliance_type": "unknown",
         }

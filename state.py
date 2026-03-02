@@ -26,13 +26,14 @@ class AgentState(TypedDict):
     compliance_type: str
     language: str
     ambiguity_flag: bool
+    off_topic: bool
     missing_info_type: Optional[str]
     missing_info_description: Optional[str]
     clarification_question: Optional[str]
     pending_clarification: Optional[str]
     needs_checklist: bool
     needs_calendar: bool
-
+    
     # retrieval
     retrieved_docs: List[Dict]
     confidence: float
